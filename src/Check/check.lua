@@ -18,6 +18,40 @@ local function read_file(path)
   return c
 end
 
+local function trim(s)
+  return (s:gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+local function parse_env_line(line)
+  local s = trim(line)
+  if s == "" or s:sub(1, 1) == "#" then return nil end
+  if s:sub(1, 7) == "export " then
+    s = trim(s:sub(8))
+  end
+  local key, val = s:match("^([A-Za-z_][A-Za-z0-9_]*)%s*=%s*(.*)$")
+  if not key then return nil end
+  val = trim(val)
+  if val:sub(1, 1) == "\"" and val:sub(-1) == "\"" then
+    val = val:sub(2, -2)
+  elseif val:sub(1, 1) == "'" and val:sub(-1) == "'" then
+    val = val:sub(2, -2)
+  end
+  return key, val
+end
+
+local function read_env(path)
+  local raw = read_file(path)
+  if not raw then return {} end
+  local env = {}
+  for line in raw:gmatch("[^\r\n]+") do
+    local key, val = parse_env_line(line)
+    if key then
+      env[key] = val
+    end
+  end
+  return env
+end
+
 local function json_get_string(json, key)
   local pat = '"' .. key .. '"%s*:%s*"(.-)"'
   return json:match(pat)
@@ -51,14 +85,27 @@ local function load_config()
   cfg.ca_file = json_get_string(openai, "ca_file")
   cfg.verify_tls = openai:match('"verify_tls"%s*:%s*(true)') ~= nil
 
-  local env_endpoint = os.getenv("OPENAI_ENDPOINT")
-  if env_endpoint and env_endpoint ~= "" then
-    cfg.endpoint = env_endpoint
+  local base = script_dir()
+  local env_file = base .. "/../../.env"
+  local env_map = read_env(env_file)
+  local file_endpoint = env_map.OPENAI_ENDPOINT
+  if file_endpoint and file_endpoint ~= "" then
+    cfg.endpoint = file_endpoint
+  else
+    local env_endpoint = os.getenv("OPENAI_ENDPOINT")
+    if env_endpoint and env_endpoint ~= "" then
+      cfg.endpoint = env_endpoint
+    end
   end
 
-  local env_api_key = os.getenv("OPENAI_API_KEY")
-  if env_api_key and env_api_key ~= "" then
-    cfg.api_key = env_api_key
+  local file_api_key = env_map.OPENAI_API_KEY
+  if file_api_key and file_api_key ~= "" then
+    cfg.api_key = file_api_key
+  else
+    local env_api_key = os.getenv("OPENAI_API_KEY")
+    if env_api_key and env_api_key ~= "" then
+      cfg.api_key = env_api_key
+    end
   end
 
   if not cfg.endpoint or cfg.endpoint == "" then

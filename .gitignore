@@ -1,5 +1,8 @@
 # runtime/temp
 /temp/
 
+# env (secrets)
+.env
+
 # agent local data (may contain secrets)
 /agents/**/.rlizx/

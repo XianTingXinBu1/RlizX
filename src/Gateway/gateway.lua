@@ -20,4 +20,9 @@ function M.handle_input(input, agent_name)
   return hub.handle_request(input, agent_name)
 end
 
+function M.append_memory(agent_name, role, content)
+  local hub = load_hub()
+  return hub.append_memory(agent_name, role, content)
+end
+
 return M

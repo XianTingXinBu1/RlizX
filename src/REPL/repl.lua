@@ -301,66 +301,15 @@ REPL 指令:
     return root .. "/" .. name .. "/.rlizx/memory"
   end
 
-  local function agent_memory_path(root, name)
-    return agent_memory_dir(root, name) .. "/work-memory.json"
+  local function agent_longterm_path(root, name)
+    return agent_memory_dir(root, name) .. "/long-term.db"
   end
 
-  local memory_cache = {}
-
-  local function load_memory(root, name)
-    if memory_cache[name] then
-      return memory_cache[name]
+  local function ensure_longterm_file(root, name)
+    local path = agent_longterm_path(root, name)
+    if not path_exists(path) then
+      write_file(path, "[]")
     end
-
-    local path = agent_memory_path(root, name)
-    local raw = read_file(path)
-    local list = {}
-
-    if raw and raw ~= "" then
-      for obj in raw:gmatch("%b{}") do
-        local role = obj:match('"role"%s*:%s*"(.-)"')
-        local content = obj:match('"content"%s*:%s*"(.-)"')
-        if role and content then
-          list[#list + 1] = {
-            role = json_unescape(role),
-            content = json_unescape(content)
-          }
-        end
-      end
-    end
-
-    memory_cache[name] = list
-    return list
-  end
-
-  local function save_memory(root, name, list)
-    local dir = agent_memory_dir(root, name)
-    ensure_dir(dir)
-    local path = agent_memory_path(root, name)
-
-    local items = {}
-    for _, item in ipairs(list) do
-      local role = json_escape(item.role or "")
-      local content = json_escape(item.content or "")
-      items[#items + 1] = string.format('{"role":"%s","content":"%s"}', role, content)
-    end
-
-    local json = "[" .. table.concat(items, ",") .. "]"
-    write_file(path, json)
-  end
-
-  local function append_memory(root, name, role, content)
-    if not name or name == "" then return end
-    if content == nil then return end
-
-    local list = load_memory(root, name)
-    list[#list + 1] = { role = role, content = content }
-
-    while #list > 20 do
-      table.remove(list, 1)
-    end
-
-    save_memory(root, name, list)
   end
 
   local base = script_dir()
@@ -394,6 +343,7 @@ REPL 指令:
 
     ensure_dir(cfg_dir)
     ensure_dir(cfg_dir .. "/memory")
+    ensure_longterm_file(agents_root, name)
 
     if not path_exists(cfg_path) then
       local default_cfg = read_default_agent_config(base) or "{}"
@@ -565,12 +515,19 @@ REPL 指令:
           if not current_agent then
             io.stdout:write("请先 /switch <名称> 选择 agent\n")
           else
-            append_memory(agents_root, current_agent, "user", line)
+            local okm1, errm1 = pcall(gateway.append_memory, current_agent, "user", line)
+            if not okm1 and errm1 then
+              io.stdout:write("[Gateway Memory Error] " .. tostring(errm1) .. "\n")
+            end
+
             local ok2, resp = pcall(gateway.handle_input, line, current_agent)
             if ok2 then
               if resp ~= nil then
                 io.stdout:write(tostring(resp) .. "\n")
-                append_memory(agents_root, current_agent, "assistant", tostring(resp))
+                local okm2, errm2 = pcall(gateway.append_memory, current_agent, "assistant", tostring(resp))
+                if not okm2 and errm2 then
+                  io.stdout:write("[Gateway Memory Error] " .. tostring(errm2) .. "\n")
+                end
               end
             else
               io.stdout:write("[Gateway Error] " .. tostring(resp) .. "\n")
