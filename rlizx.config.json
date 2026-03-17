@@ -1,0 +1,13 @@
+{
+  "openai": {
+    "endpoint": "",
+    "api_key": "",
+    "model": "gpt-5.2-codex",
+    "timeout": 60,
+    "temperature": 1,
+    "stream": true,
+    "ca_file": "/data/data/com.termux/files/usr/etc/tls/cert.pem",
+    "verify_tls": true
+  }
+}
+
