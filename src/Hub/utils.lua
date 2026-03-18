@@ -88,10 +88,16 @@ function M.json_get_number(json, key)
 end
 
 function M.json_get_bool(json, key)
-  local pat = '"' .. key .. '"%s*:%s*(true|false)'
-  local v = json:match(pat)
-  if v == "true" then return true end
-  if v == "false" then return false end
+  local true_pat = '"' .. key .. '"%s*:%s*true'
+  if json:match(true_pat) then
+    return true
+  end
+
+  local false_pat = '"' .. key .. '"%s*:%s*false'
+  if json:match(false_pat) then
+    return false
+  end
+
   return nil
 end
 

@@ -23,8 +23,13 @@ RlizX - 命令行 AI 编程助手（纯 Lua）
   -h, --help        显示帮助
   -v, --version     显示版本
 
+REPL 特性:
+  - 显示当前 agent 的动态提示符
+  - 支持 /status 查看当前状态
+  - 支持 /switch 与 /agent 子命令管理 agent
+
 说明:
-  目前提供基础 CLI 与 REPL 框架，后续可接入模型调用与工具链。
+  当前版本已提供基础 CLI、REPL、配置检查、agent 管理与模型调用链路。
 ]])
 end
 

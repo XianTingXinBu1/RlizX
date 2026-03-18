@@ -79,24 +79,42 @@ function M.stream_request(cfg, payload)
 
   local buffer = ""
   local in_body = false
+  local chunks = {}
 
   local function on_chunk(chunk)
     buffer = buffer .. chunk
     if not in_body then
       local idx = buffer:find("\r\n\r\n", 1, true)
+      local sep_len = 4
+      if not idx then
+        idx = buffer:find("\n\n", 1, true)
+        sep_len = 2
+      end
       if not idx then
         return true
       end
-      buffer = buffer:sub(idx + 4)
+      buffer = buffer:sub(idx + sep_len)
       in_body = true
     end
 
     while true do
-      local s, e, line = buffer:find("data:%s*(.-)\r\n")
+      local s = buffer:find("data:", 1, true)
       if not s then
         break
       end
-      buffer = buffer:sub(e + 1)
+
+      local line_end = buffer:find("\r\n", s, true)
+      local sep_len = 2
+      if not line_end then
+        line_end = buffer:find("\n", s, true)
+        sep_len = 1
+      end
+      if not line_end then
+        break
+      end
+
+      local line = buffer:sub(s + 5, line_end - 1):match("^%s*(.-)%s*$") or ""
+      buffer = buffer:sub(line_end + sep_len)
       if line == "[DONE]" then
         return false
       end
@@ -104,6 +122,7 @@ function M.stream_request(cfg, payload)
       if delta then
         local text = delta:gsub("\\n", "\n"):gsub("\\r", "\r"):gsub("\\t", "\t")
         text = text:gsub("\\u0000", ""):gsub("%z", "")
+        chunks[#chunks + 1] = text
         io.stdout:write(text)
         io.stdout:flush()
       end
@@ -125,7 +144,7 @@ function M.stream_request(cfg, payload)
   end
 
   io.stdout:write("\n")
-  return ""
+  return table.concat(chunks)
 end
 
 function M.parse_http_body(resp)

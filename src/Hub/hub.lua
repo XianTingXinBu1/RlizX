@@ -6,7 +6,6 @@ local U = dofile(BASE_DIR .. "/utils.lua")
 local Cfg = dofile(BASE_DIR .. "/config.lua")
 local Http = dofile(BASE_DIR .. "/http.lua")
 local Mem = dofile(BASE_DIR .. "/memory.lua")
-local Vec = dofile(BASE_DIR .. "/vector.lua")
 
 local function build_system_text(base, agent_name, input, cfg)
   local parts = {}
@@ -14,20 +13,6 @@ local function build_system_text(base, agent_name, input, cfg)
   local role_text = Mem.read_role_text(base, agent_name)
   if role_text and role_text ~= "" then
     parts[#parts + 1] = role_text
-  end
-
-  local longterm_hits = Vec.get_longterm_hits(cfg, base, agent_name, input)
-  if #longterm_hits > 0 then
-    local lines = { "长期记忆:" }
-    for _, item in ipairs(longterm_hits) do
-      local text = item.text or ""
-      if text ~= "" then
-        lines[#lines + 1] = text
-      end
-    end
-    if #lines > 1 then
-      parts[#parts + 1] = table.concat(lines, "\n")
-    end
   end
 
   local memory = Mem.read_memory_list(base, agent_name)
@@ -91,11 +76,11 @@ function M.handle_request(input, agent_name)
   local payload = build_payload(cfg.model, messages, cfg.temperature, cfg.stream)
 
   if cfg.stream then
-    local _, err2 = Http.stream_request(cfg, payload)
+    local text, err2 = Http.stream_request(cfg, payload)
     if err2 then
       return "[Hub Stream Error] " .. tostring(err2)
     end
-    return ""
+    return text
   end
 
   local raw, err2 = Http.http_request(cfg, payload)

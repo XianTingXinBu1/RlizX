@@ -15,17 +15,6 @@ local function parse_openai_config(openai)
   return cfg
 end
 
-local function parse_vector_config(vector)
-  local cfg = {}
-  cfg.endpoint = U.json_get_string(vector, "endpoint")
-  cfg.api_key = U.json_get_string(vector, "api_key")
-  cfg.model = U.json_get_string(vector, "model")
-  cfg.timeout = U.json_get_number(vector, "timeout")
-  cfg.ca_file = U.json_get_string(vector, "ca_file")
-  cfg.verify_tls = U.json_get_bool(vector, "verify_tls")
-  return cfg
-end
-
 local function parse_agent_config(raw)
   if not raw then return nil end
   local cfg = {}
@@ -80,17 +69,11 @@ function M.load_config(agent_name)
     return nil, "配置缺少 openai 段"
   end
 
-  local vector = raw:match('"vector"%s*:%s*%{(.-)%}')
-
   local cfg = parse_openai_config(openai)
   cfg.timeout = cfg.timeout or 60
   cfg.temperature = cfg.temperature or 0.2
   cfg.stream = cfg.stream == true
   cfg.verify_tls = cfg.verify_tls == true
-
-  cfg.vector = vector and parse_vector_config(vector) or {}
-  cfg.vector.timeout = cfg.vector.timeout or 60
-  cfg.vector.verify_tls = cfg.vector.verify_tls == true
 
   if agent_name and agent_name ~= "" then
     local agent_path = base .. "/../../agents/" .. agent_name .. "/.rlizx/config.json"
@@ -123,26 +106,6 @@ function M.load_config(agent_name)
     end
   end
 
-  local v_file_endpoint = env_map.VECTOR_ENDPOINT
-  if v_file_endpoint and v_file_endpoint ~= "" then
-    cfg.vector.endpoint = v_file_endpoint
-  else
-    local v_env_endpoint = os.getenv("VECTOR_ENDPOINT")
-    if v_env_endpoint and v_env_endpoint ~= "" then
-      cfg.vector.endpoint = v_env_endpoint
-    end
-  end
-
-  local v_file_api_key = env_map.VECTOR_API_KEY
-  if v_file_api_key and v_file_api_key ~= "" then
-    cfg.vector.api_key = v_file_api_key
-  else
-    local v_env_api_key = os.getenv("VECTOR_API_KEY")
-    if v_env_api_key and v_env_api_key ~= "" then
-      cfg.vector.api_key = v_env_api_key
-    end
-  end
-
   if not cfg.endpoint or cfg.endpoint == "" then
     return nil, "openai.endpoint 未配置"
   end
@@ -151,15 +114,6 @@ function M.load_config(agent_name)
   end
   if not cfg.model or cfg.model == "" then
     return nil, "openai.model 未配置"
-  end
-
-  if cfg.vector.endpoint and cfg.vector.endpoint ~= "" then
-    if not cfg.vector.api_key or cfg.vector.api_key == "" then
-      return nil, "vector.api_key 未配置"
-    end
-    if not cfg.vector.model or cfg.vector.model == "" then
-      return nil, "vector.model 未配置"
-    end
   end
 
   return cfg

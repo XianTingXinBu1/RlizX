@@ -84,59 +84,150 @@ local function buf_width(buf, n)
   return w
 end
 
-local function render_line(prompt, buf, cursor)
+local function text_width(s)
+  return buf_width(utf8_chars(s or ""), #(utf8_chars(s or "")))
+end
+
+local function render_line(prompt, buf, cursor, menu, selected_index, last_menu_lines)
   io.stdout:write("\r")
   io.stdout:write(prompt)
   io.stdout:write(table.concat(buf))
   io.stdout:write("\27[0K")
-  local target = #prompt + buf_width(buf, cursor)
+
+  for _ = 1, (last_menu_lines or 0) do
+    io.stdout:write("\n\27[0K")
+  end
+  for _ = 1, (last_menu_lines or 0) do
+    io.stdout:write("\27[1A")
+  end
+
+  local menu_lines = 0
+  if menu and #menu > 0 then
+    menu_lines = #menu
+    for i, item in ipairs(menu) do
+      local prefix = (i == selected_index) and "  > " or "    "
+      io.stdout:write("\n\27[0K" .. prefix .. item.label)
+    end
+    for _ = 1, menu_lines do
+      io.stdout:write("\27[1A")
+    end
+  end
+
+  local target = text_width(prompt) + buf_width(buf, cursor)
   io.stdout:write("\r")
   if target > 0 then
     io.stdout:write(string.format("\27[%dC", target))
   end
+  io.stdout:flush()
+  return menu_lines
 end
 
-local function read_line(prompt, history)
+local function read_line(prompt, history, complete_fn)
   local buf = {}
   local cursor = 0
   local hist_index = nil
   local saved_line = ""
+  local menu = {}
+  local selected_index = 1
+  local last_menu_lines = 0
+  local suppress_menu_once = false
+
+  local function current_text()
+    return table.concat(buf)
+  end
 
   local function set_buffer(text)
     buf = utf8_chars(text)
     cursor = #buf
   end
 
-  render_line(prompt, buf, cursor)
+  local function refresh_menu()
+    if suppress_menu_once then
+      menu = {}
+      selected_index = 1
+      suppress_menu_once = false
+      return
+    end
+
+    if not complete_fn then
+      menu = {}
+      selected_index = 1
+      return
+    end
+
+    local items = complete_fn(current_text()) or {}
+    menu = items
+    if #menu == 0 then
+      selected_index = 1
+    elseif selected_index < 1 then
+      selected_index = 1
+    elseif selected_index > #menu then
+      selected_index = #menu
+    end
+  end
+
+  local function redraw()
+    last_menu_lines = render_line(prompt, buf, cursor, menu, selected_index, last_menu_lines)
+  end
+
+  local function accept_completion()
+    local item = menu[selected_index]
+    if not item then
+      return false
+    end
+    set_buffer(item.value)
+    hist_index = nil
+    suppress_menu_once = not item.keep_menu_open
+    refresh_menu()
+    redraw()
+    return true
+  end
+
+  refresh_menu()
+  redraw()
 
   while true do
     local k = read_key()
     if not k then return nil end
 
     if k == "\r" or k == "\n" then
-      io.stdout:write("\n")
-      return table.concat(buf)
+      if #menu > 0 then
+        accept_completion()
+      else
+        io.stdout:write("\n")
+        return current_text()
+      end
     elseif k == "\127" or k == "\8" then
       if cursor > 0 then
         table.remove(buf, cursor)
         cursor = cursor - 1
+        hist_index = nil
       end
+      refresh_menu()
     elseif k == "\3" then
-      -- Ctrl+C
       io.stdout:write("\n")
       return nil, "interrupt"
     elseif k == "ESC[A" then
-      if #history > 0 then
+      if #menu > 0 then
+        if selected_index > 1 then
+          selected_index = selected_index - 1
+        end
+      elseif #history > 0 then
         if not hist_index then
           hist_index = #history
-          saved_line = table.concat(buf)
+          saved_line = current_text()
         elseif hist_index > 1 then
           hist_index = hist_index - 1
         end
         set_buffer(history[hist_index] or "")
+        refresh_menu()
       end
     elseif k == "ESC[B" then
-      if hist_index then
+      if #menu > 0 then
+        if selected_index < #menu then
+          selected_index = selected_index + 1
+        end
+      elseif hist_index then
         if hist_index < #history then
           hist_index = hist_index + 1
           set_buffer(history[hist_index] or "")
@@ -144,60 +235,37 @@ local function read_line(prompt, history)
           hist_index = nil
           set_buffer(saved_line)
         end
+        refresh_menu()
       end
     elseif k == "ESC[D" then
       if cursor > 0 then
         cursor = cursor - 1
       end
+      refresh_menu()
     elseif k == "ESC[C" then
       if cursor < #buf then
         cursor = cursor + 1
       end
+      refresh_menu()
     elseif k >= " " then
       table.insert(buf, cursor + 1, k)
       cursor = cursor + 1
+      hist_index = nil
+      refresh_menu()
     end
 
-    render_line(prompt, buf, cursor)
+    redraw()
   end
 end
 
 function M.start(opts)
   opts = opts or {}
   local version = opts.version or "0.1.0"
-  local prompt = opts.prompt or "> "
+  local default_prompt = opts.prompt or "> "
 
   local function print_version()
     printf("RlizX v%s\n", version)
   end
-
-  local function repl_help()
-    io.stdout:write([[
-REPL 指令:
-  /help                     显示本帮助
-  /version                  显示版本
-  /clear                    清屏
-  /exit                     退出 REPL
-  /switch <名称>            切换当前 agent
-  /agent list               列出所有 agent
-  /agent add <名称>         新增 agent（创建目录与默认配置）
-  /agent delete <名称>      删除 agent 目录
-
-快捷键:
-  ↑/↓                       历史命令（当前 agent）
-  ←/→                       光标移动
-  Backspace                 删除字符
-
-说明:
-  每个 agent 独立历史记录与配置。
-]])
-  end
-
-  io.stdout:write("RlizX REPL\n")
-  io.stdout:write("输入 '/help' 查看指令，'/exit' 退出。\n")
-
-  local stty_state = get_stty_state()
-  set_raw_mode()
 
   local function script_dir()
     local info = debug.getinfo(1, "S")
@@ -212,180 +280,124 @@ REPL 指令:
     return (s:match("^%s*(.-)%s*$") or "")
   end
 
-  local function is_valid_agent_name(name)
-    return name and name:match("^[%w%-%_]+$") ~= nil
-  end
-
-  local function ensure_dir(path)
-    os.execute("mkdir -p " .. path)
-  end
-
-  local function remove_dir(path)
-    os.execute("rm -rf " .. path)
-  end
-
-  local function path_exists(path)
-    local ok = os.execute("test -e " .. path .. " >/dev/null 2>&1")
-    return ok == true or ok == 0
-  end
-
-  local function dir_exists(path)
-    local ok = os.execute("test -d " .. path .. " >/dev/null 2>&1")
-    return ok == true or ok == 0
-  end
-
-  local function read_file(path)
-    local f = io.open(path, "r")
-    if not f then return nil end
-    local c = f:read("*a")
-    f:close()
-    return c
-  end
-
-  local function write_file(path, content)
-    local f = io.open(path, "w")
-    if not f then return false end
-    f:write(content)
-    f:close()
-    return true
-  end
-
-  local function list_dir(path)
-    local p = io.popen("ls -1 " .. path .. " 2>/dev/null")
-    if not p then return {} end
-    local t = {}
-    for line in p:lines() do
-      if line ~= "." and line ~= ".." then
-        t[#t + 1] = line
-      end
-    end
-    p:close()
-    table.sort(t)
-    return t
-  end
-
-  local function read_default_agent_config(base)
-    local path = base .. "/../../rlizx.config.json"
-    local raw = read_file(path)
-    if not raw then return nil end
-    local openai = raw:match('"openai"%s*:%s*%{(.-)%}')
-    if not openai then return nil end
-
-    local function get(key)
-      local pat = '"' .. key .. '"%s*:%s*"(.-)"'
-      return openai:match(pat)
-    end
-
-    local model = get("model") or ""
-    return string.format('{"model":"%s"}', model)
-  end
-
-  local function json_escape(s)
-    return (tostring(s)
-      :gsub("\\", "\\\\")
-      :gsub("\"", "\\\"")
-      :gsub("\n", "\\n")
-      :gsub("\r", "\\r")
-      :gsub("\t", "\\t"))
-  end
-
-  local function json_unescape(s)
-    return (s:gsub("\\n", "\n")
-             :gsub("\\r", "\r")
-             :gsub("\\t", "\t")
-             :gsub('\\"', '"')
-             :gsub("\\\\", "\\"))
-  end
-
-  local function agent_memory_dir(root, name)
-    return root .. "/" .. name .. "/.rlizx/memory"
-  end
-
-  local function agent_longterm_path(root, name)
-    return agent_memory_dir(root, name) .. "/long-term.db"
-  end
-
-  local function ensure_longterm_file(root, name)
-    local path = agent_longterm_path(root, name)
-    if not path_exists(path) then
-      write_file(path, "[]")
-    end
-  end
-
   local base = script_dir()
   local gateway = dofile(base .. "/../Gateway/gateway.lua")
-  local agents_root = base .. "/../../agents"
+  local agent_mod = dofile(base .. "/../Hub/agent.lua")
+  local agent_manager = agent_mod.create_manager(base)
 
-  ensure_dir(agents_root)
-
-  local current_agent = nil
   local histories = {}
+
+  local function current_agent_label()
+    return agent_manager.current_agent or "未选择"
+  end
+
+  local function build_prompt()
+    if agent_manager.current_agent then
+      return string.format("[%s] > ", agent_manager.current_agent)
+    end
+    return string.format("[%s] %s", current_agent_label(), default_prompt)
+  end
+
+  local function print_status()
+    local count = #agent_manager.list_agents()
+    io.stdout:write(string.format("状态: agent=%s | agents=%d\n", current_agent_label(), count))
+    if not agent_manager.current_agent then
+      io.stdout:write("提示: 先使用 /switch <名称> 选择或创建 agent。\n")
+    end
+  end
+
+  local command_specs = {
+    { label = "/help", value = "/help", desc = "显示本帮助" },
+    { label = "/status", value = "/status", desc = "显示当前状态" },
+    { label = "/version", value = "/version", desc = "显示版本" },
+    { label = "/clear", value = "/clear", desc = "清屏" },
+    { label = "/exit", value = "/exit", desc = "退出 REPL" },
+    { label = "/switch ", value = "/switch ", desc = "切换当前 agent", keep_menu_open = true },
+    { label = "/agent list", value = "/agent list", desc = "列出所有 agent" },
+    { label = "/agent add ", value = "/agent add ", desc = "新增 agent" },
+    { label = "/agent delete ", value = "/agent delete ", desc = "删除 agent", keep_menu_open = true },
+  }
+
+  local function complete_command(text)
+    if text:sub(1, 1) ~= "/" then
+      return {}
+    end
+
+    local function complete_agent_names(prefix, base_cmd)
+      local partial = text:sub(#prefix + 1)
+      local matches = {}
+      for _, name in ipairs(agent_manager.list_agents()) do
+        if name:sub(1, #partial) == partial then
+          matches[#matches + 1] = {
+            label = string.format("%-16s %s", base_cmd .. name, "agent"),
+            value = prefix .. name,
+            keep_menu_open = false,
+          }
+        end
+      end
+      return matches
+    end
+
+    if text:sub(1, 8) == "/switch " then
+      return complete_agent_names("/switch ", "/switch ")
+    end
+
+    if text:sub(1, 14) == "/agent delete " then
+      return complete_agent_names("/agent delete ", "/agent delete ")
+    end
+
+    local matches = {}
+    for _, spec in ipairs(command_specs) do
+      if spec.value:sub(1, #text) == text then
+        matches[#matches + 1] = {
+          label = string.format("%-16s %s", spec.label, spec.desc),
+          value = spec.value,
+          keep_menu_open = spec.keep_menu_open,
+        }
+      end
+    end
+    return matches
+  end
+
+  local function repl_help()
+    io.stdout:write([[
+REPL 指令:
+  /help                     显示本帮助
+  /status                   显示当前状态
+  /version                  显示版本
+  /clear                    清屏
+  /exit                     退出 REPL
+  /switch <名称>            切换当前 agent
+  /agent list               列出所有 agent
+  /agent add <名称>         新增 agent（创建目录与默认配置）
+  /agent delete <名称>      删除 agent 目录
+
+快捷键:
+  ↑/↓                       历史命令（当前 agent）/补全项选择
+  ←/→                       光标移动
+  Backspace                 删除字符
+  Ctrl+C                    退出 REPL
+  / 后继续输入              弹出命令补全
+  Enter                     确认补全或提交输入
+
+说明:
+  每个 agent 独立历史记录与配置。
+  当前提示符会显示已选中的 agent。
+]])
+  end
+
+  io.stdout:write(string.format("RlizX REPL v%s\n", version))
+  io.stdout:write("输入 '/help' 查看指令，'/exit' 退出。\n")
+  print_status()
+
+  local stty_state = get_stty_state()
+  set_raw_mode()
 
   local function get_history(agent)
     if not histories[agent] then
       histories[agent] = {}
     end
     return histories[agent]
-  end
-
-  local function agent_config_path(name)
-    return agents_root .. "/" .. name .. "/.rlizx/config.json"
-  end
-
-  local function init_agent(name)
-    if not is_valid_agent_name(name) then
-      return false, "非法名称，仅允许字母/数字/下划线/短横线"
-    end
-
-    local agent_dir = agents_root .. "/" .. name
-    local cfg_dir = agent_dir .. "/.rlizx"
-    local cfg_path = cfg_dir .. "/config.json"
-
-    ensure_dir(cfg_dir)
-    ensure_dir(cfg_dir .. "/memory")
-    ensure_longterm_file(agents_root, name)
-
-    if not path_exists(cfg_path) then
-      local default_cfg = read_default_agent_config(base) or "{}"
-      if not write_file(cfg_path, default_cfg) then
-        return false, "写入配置失败: " .. cfg_path
-      end
-    end
-
-    return true
-  end
-
-  local function delete_agent(name)
-    if not is_valid_agent_name(name) then
-      return false, "非法名称，仅允许字母/数字/下划线/短横线"
-    end
-    local agent_dir = agents_root .. "/" .. name
-    if not dir_exists(agent_dir) then
-      return false, "agent 不存在: " .. name
-    end
-    remove_dir(agent_dir)
-    histories[name] = nil
-    if current_agent == name then
-      current_agent = nil
-    end
-    return true
-  end
-
-  local function list_agents()
-    return list_dir(agents_root)
-  end
-
-  local function switch_agent(name)
-    if not is_valid_agent_name(name) then
-      return false, "非法名称，仅允许字母/数字/下划线/短横线"
-    end
-    local agent_dir = agents_root .. "/" .. name
-    if not dir_exists(agent_dir) then
-      local ok, err = init_agent(name)
-      if not ok then return false, err end
-    end
-    current_agent = name
-    return true
   end
 
   local function parse_command(line)
@@ -411,11 +423,15 @@ REPL 指令:
     if cmd.cmd == "help" then
       repl_help()
       return true
+    elseif cmd.cmd == "status" then
+      print_status()
+      return true
     elseif cmd.cmd == "version" then
       print_version()
       return true
     elseif cmd.cmd == "clear" then
       io.stdout:write("\27[2J\27[H")
+      print_status()
       return true
     elseif cmd.cmd == "exit" then
       return false, "exit"
@@ -425,7 +441,7 @@ REPL 指令:
         io.stdout:write("用法: /switch <名称>\n")
         return true
       end
-      local ok, err = switch_agent(name)
+      local ok, err = agent_manager.switch_agent(name)
       if not ok then
         io.stdout:write("[Agent Error] " .. tostring(err) .. "\n")
         return true
@@ -435,14 +451,14 @@ REPL 指令:
     elseif cmd.cmd == "agent" then
       local sub = cmd.args[1]
       if sub == "list" then
-        local list = list_agents()
+        local list = agent_manager.list_agents()
         if #list == 0 then
-          io.stdout:write("暂无 agent\n")
+          io.stdout:write("暂无 agent，可使用 /switch <名称> 直接创建。\n")
         else
-          io.stdout:write("agents:\n")
+          io.stdout:write(string.format("agents (%d):\n", #list))
           for _, n in ipairs(list) do
-            if n == current_agent then
-              io.stdout:write("  * " .. n .. "\n")
+            if n == agent_manager.current_agent then
+              io.stdout:write("  * " .. n .. " (current)\n")
             else
               io.stdout:write("  - " .. n .. "\n")
             end
@@ -455,7 +471,7 @@ REPL 指令:
           io.stdout:write("用法: /agent add <名称>\n")
           return true
         end
-        local ok, err = init_agent(name)
+        local ok, err = agent_manager.init_agent(name)
         if not ok then
           io.stdout:write("[Agent Error] " .. tostring(err) .. "\n")
           return true
@@ -468,7 +484,10 @@ REPL 指令:
           io.stdout:write("用法: /agent delete <名称>\n")
           return true
         end
-        local ok, err = delete_agent(name)
+        local ok, err = agent_manager.delete_agent(name)
+        if ok then
+          histories[name] = nil
+        end
         if not ok then
           io.stdout:write("[Agent Error] " .. tostring(err) .. "\n")
           return true
@@ -480,16 +499,16 @@ REPL 指令:
         return true
       end
     else
-      io.stdout:write("未知命令: /" .. cmd.cmd .. "\n")
+      io.stdout:write("未知命令: /" .. cmd.cmd .. "，输入 /help 查看可用指令。\n")
       return true
     end
   end
 
   local ok, err = pcall(function()
     while true do
-      local active_agent = current_agent or "default"
+      local active_agent = agent_manager.current_agent or "default"
       local history = get_history(active_agent)
-      local line, reason = read_line(prompt, history)
+      local line, reason = read_line(build_prompt(), history, complete_command)
       if not line then
         if reason == "interrupt" then
           break
@@ -502,9 +521,7 @@ REPL 指令:
         history[#history + 1] = line
       end
 
-      if line == "" then
-        -- 空行忽略
-      else
+      if line ~= "" then
         local cmd = parse_command(line)
         if cmd then
           local okc, flag = handle_command(cmd)
@@ -512,22 +529,40 @@ REPL 指令:
             break
           end
         else
-          if not current_agent then
-            io.stdout:write("请先 /switch <名称> 选择 agent\n")
+          if not agent_manager.current_agent then
+            io.stdout:write("请先使用 /switch <名称> 选择或创建 agent。\n")
           else
-            local okm1, errm1 = pcall(gateway.append_memory, current_agent, "user", line)
+            io.stdout:write(string.format("[状态] 正在请求 agent: %s\n", agent_manager.current_agent))
+
+            local okm1, errm1 = pcall(gateway.append_memory, agent_manager.current_agent, "user", line)
             if not okm1 and errm1 then
               io.stdout:write("[Gateway Memory Error] " .. tostring(errm1) .. "\n")
             end
 
-            local ok2, resp = pcall(gateway.handle_input, line, current_agent)
+            restore_mode(stty_state)
+            local ok2, resp = pcall(gateway.handle_input, line, agent_manager.current_agent)
+            set_raw_mode()
+
             if ok2 then
               if resp ~= nil then
-                io.stdout:write(tostring(resp) .. "\n")
-                local okm2, errm2 = pcall(gateway.append_memory, current_agent, "assistant", tostring(resp))
-                if not okm2 and errm2 then
-                  io.stdout:write("[Gateway Memory Error] " .. tostring(errm2) .. "\n")
+                local output = tostring(resp)
+                local cfg_mod = dofile(base .. "/../Hub/config.lua")
+                local cfg = cfg_mod.load_config(agent_manager.current_agent)
+                local is_stream = cfg and cfg.stream or false
+
+                if output ~= "" then
+                  if not is_stream then
+                    io.stdout:write(output .. "\n")
+                  end
+                  local okm2, errm2 = pcall(gateway.append_memory, agent_manager.current_agent, "assistant", output)
+                  if not okm2 and errm2 then
+                    io.stdout:write("[Gateway Memory Error] " .. tostring(errm2) .. "\n")
+                  end
+                else
+                  io.stdout:write("[状态] 请求完成，但未返回可显示内容。\n")
                 end
+              else
+                io.stdout:write("[状态] 请求完成，但未返回可显示内容。\n")
               end
             else
               io.stdout:write("[Gateway Error] " .. tostring(resp) .. "\n")
