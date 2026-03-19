@@ -20,6 +20,7 @@ if not M then
   local PathUtils = dofile(get_script_dir() .. "/path_utils.lua")
   local SearchOps = dofile(get_script_dir() .. "/search_ops.lua")
   local ScheduleOps = dofile(get_script_dir() .. "/schedule_ops.lua")
+  local SkillOps = dofile(get_script_dir() .. "/skill_ops.lua")
 
   local function register_tool_definition(registry, name, description, properties, required, handler, category)
     registry.register_tool(name, {

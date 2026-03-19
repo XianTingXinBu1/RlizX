@@ -57,6 +57,7 @@ local function parse_openai_config(openai)
   cfg.verify_tls = openai.verify_tls
   cfg.tools = parse_tools_config(openai.tools)
   cfg.tool_permissions = parse_tool_permissions(openai.tool_permissions)
+  cfg.skills_enabled = openai.skills_enabled ~= false  -- 默认启用
   return cfg
 end
 
@@ -109,6 +110,10 @@ local function merge_config(base, override)
 
   if type(override.tool_permissions) == "table" then
     base.tool_permissions = override.tool_permissions
+  end
+
+  if override.skills_enabled ~= nil then
+    base.skills_enabled = override.skills_enabled
   end
 
   return base

@@ -16,6 +16,15 @@ local FileManager = dofile(BASE_DIR .. "/../Tool/file_manager.lua")
 
 FileManager.register()
 
+-- 加载技能管理器
+local SkillManager = nil
+local function load_skill_manager()
+  if not SkillManager then
+    SkillManager = dofile(BASE_DIR .. "/../Skill/skill_manager.lua")
+  end
+  return SkillManager
+end
+
 local function make_error(code, message, detail)
   return {
     ok = false,
@@ -114,7 +123,47 @@ local function build_system_text(base, agent_name, _input, _cfg)
     parts[#parts + 1] = table.concat(lines, "\n")
   end
 
+  -- 注入技能注册表
+  local SkillMgr = load_skill_manager()
+  if SkillMgr then
+    local skill_registry_cache_key = string.format("skill_registry:%s", base)
+    local skill_registry = MemoryCache.get_or_compute(skill_registry_cache_key, function()
+      return SkillMgr.get_skill_registry(base)
+    end, 300)  -- 缓存 5 分钟
+
+    if skill_registry and next(skill_registry) ~= nil then
+      local skill_hint = build_skill_registry_hint(skill_registry)
+      parts[#parts + 1] = skill_hint
+    end
+  end
+
   return table.concat(parts, "\n\n")
+end
+
+local function build_skill_registry_hint(registry)
+  local lines = { "可用技能:" }
+  local names = {}
+  for name, _ in pairs(registry) do
+    table.insert(names, name)
+  end
+  table.sort(names)
+
+  for _, name in ipairs(names) do
+    local skill = registry[name]
+    local desc = skill.description or ""
+    local triggers = skill.triggers and #skill.triggers > 0 and table.concat(skill.triggers, ", ") or ""
+    local hint = "  - " .. name
+    if desc ~= "" then
+      hint = hint .. ": " .. desc
+    end
+    if triggers ~= "" then
+      hint = hint .. " (触发词: " .. triggers .. ")"
+    end
+    lines[#lines + 1] = hint
+  end
+  lines[#lines + 1] = ""
+  lines[#lines + 1] = "提示: 使用 load_skill_info 工具查看技能的完整详细信息，使用 read_skill_resource 工具读取技能资源。"
+  return table.concat(lines, "\n")
 end
 
 local function build_messages(base, agent_name, input, cfg)

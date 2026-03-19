@@ -1,0 +1,22 @@
+{
+  "skills": {
+    "example-skill": {
+      "author": "RlizX Team",
+      "category": "example",
+      "dependencies": {
+        "assets": true,
+        "references": true,
+        "scripts": true
+      },
+      "description": "这是一个示例技能，用于演示 RlizX 技能系统的基本功能和使用方法。",
+      "name": "example-skill",
+      "triggers": [
+        "example",
+        "demo",
+        "test"
+      ],
+      "version": "1.0.0"
+    }
+  },
+  "timestamp": 1773931364
+}
