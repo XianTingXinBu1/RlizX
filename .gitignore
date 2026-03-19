@@ -19,11 +19,11 @@ telegram_bot.log
 test_*.lua
 demo_*.lua
 
-# documentation (already in repo)
-*.md
-
 # temporary files
 *.tmp
 *.bak
 *.swp
 *~
+
+# allow security documentation
+!SECURITY.md
