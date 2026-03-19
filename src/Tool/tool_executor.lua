@@ -218,6 +218,20 @@ if not M then
     return #calls > 0
   end
 
+  local function value_to_text(v)
+    local tv = type(v)
+    if tv == "nil" then
+      return ""
+    elseif tv == "string" then
+      return v
+    elseif tv == "number" or tv == "boolean" then
+      return tostring(v)
+    elseif tv == "table" then
+      return encode_json(v)
+    end
+    return tostring(v)
+  end
+
   function M.execute_single_tool(tool_call, on_progress)
     if on_progress then
       on_progress(string.format("\n[Tool] 调用: %s", tostring(tool_call.name)))
@@ -239,23 +253,35 @@ if not M then
         if type(call_result) == "table" then
           result = call_result
         else
-          result = { result = tostring(call_result or "") }
+          result = { result = call_result }
         end
       end
     end
 
+    local is_error = result.error ~= nil
+    local payload_text
+
+    if is_error then
+      payload_text = value_to_text(result.error)
+      if payload_text == "" then
+        payload_text = "unknown tool error"
+      end
+    else
+      payload_text = value_to_text(result.result)
+    end
+
     if on_progress then
-      if result.error then
-        on_progress(string.format("[Tool] 错误: %s", tostring(result.error)))
+      if is_error then
+        on_progress(string.format("[Tool] 错误: %s", payload_text))
       else
-        on_progress(string.format("[Tool] 结果: %s", tostring(result.result or "")))
+        on_progress(string.format("[Tool] 结果: %s", payload_text))
       end
     end
 
     return {
       tool_call_id = tostring(tool_call.id or ""),
       role = "tool",
-      content = tostring(result.error or result.result or ""),
+      content = payload_text,
     }
   end
 
