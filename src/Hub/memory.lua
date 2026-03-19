@@ -26,14 +26,20 @@ function M.read_role_text(base, agent_name)
   if not agent_name or agent_name == "" then return nil end
   local parts = {}
 
-  local main = U.read_file(agent_role_path(base, agent_name, "main.md"))
-  if main and main ~= "" then parts[#parts + 1] = main end
+  local ordered_files = {
+    "memorandum.md",
+    "main.md",
+    "individuality.md",
+    "agent.md",
+    "user.md",
+  }
 
-  local individuality = U.read_file(agent_role_path(base, agent_name, "individuality.md"))
-  if individuality and individuality ~= "" then parts[#parts + 1] = individuality end
-
-  local user = U.read_file(agent_role_path(base, agent_name, "user.md"))
-  if user and user ~= "" then parts[#parts + 1] = user end
+  for _, file in ipairs(ordered_files) do
+    local text = U.read_file(agent_role_path(base, agent_name, file))
+    if text and text ~= "" then
+      parts[#parts + 1] = text
+    end
+  end
 
   if #parts == 0 then return nil end
   return table.concat(parts, "\n\n")

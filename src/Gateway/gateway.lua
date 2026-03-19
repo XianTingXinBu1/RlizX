@@ -15,9 +15,9 @@ local function load_hub()
   return dofile(base .. "/../Hub/hub.lua")
 end
 
-function M.handle_input(input, agent_name)
+function M.handle_input(input, agent_name, on_progress)
   local hub = load_hub()
-  return hub.handle_request(input, agent_name)
+  return hub.handle_request(input, agent_name, on_progress)
 end
 
 function M.append_memory(agent_name, role, content)

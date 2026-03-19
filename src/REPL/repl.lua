@@ -539,8 +539,13 @@ REPL 指令:
               io.stdout:write("[Gateway Memory Error] " .. tostring(errm1) .. "\n")
             end
 
+            local function on_tool_progress(msg)
+              io.stdout:write(msg .. "\n")
+              io.stdout:flush()
+            end
+
             restore_mode(stty_state)
-            local ok2, resp = pcall(gateway.handle_input, line, agent_manager.current_agent)
+            local ok2, resp = pcall(gateway.handle_input, line, agent_manager.current_agent, on_tool_progress)
             set_raw_mode()
 
             if ok2 then

@@ -1,13 +1,2 @@
-{
-  "openai": {
-    "endpoint": "https://example.com/v1/chat/completions",
-    "api_key": "",
-    "model": "gpt-5.2-codex",
-    "timeout": 60,
-    "temperature": 1,
-    "stream": true,
-    "ca_file": "/data/data/com.termux/files/usr/etc/tls/cert.pem",
-    "verify_tls": true
-  }
-}
+{"openai": {"endpoint": "https://example.com/v1/chat/completions", "api_key": "", "model": "gpt-5.4", "timeout": 60, "temperature": 1, "stream": true, "ca_file": "/data/data/com.termux/files/usr/etc/tls/cert.pem", "verify_tls": true, "tools": {"read_file": true, "write_file": true, "list_files": true, "search_files": true, "patch_file": true, "read_json": true, "write_json_key": true, "git_status": true, "git_diff": true}}}
 

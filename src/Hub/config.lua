@@ -2,6 +2,48 @@ local U = dofile(require("debug").getinfo(1, "S").source:sub(2):match("^(.*)/") 
 
 local M = {}
 
+local function parse_tools_config(json)
+  local tools = {}
+
+  local tools_start = json:find('"tools"')
+  if not tools_start then
+    return tools
+  end
+
+  local obj_start = json:find('%{', tools_start)
+  if not obj_start then
+    return tools
+  end
+
+  local depth = 0
+  local obj_end = obj_start
+
+  for i = obj_start, #json do
+    local c = json:sub(i, i)
+    if c == '{' then
+      depth = depth + 1
+    elseif c == '}' then
+      depth = depth - 1
+      if depth == 0 then
+        obj_end = i
+        break
+      end
+    end
+  end
+
+  if depth ~= 0 then
+    return tools
+  end
+
+  local tools_section = json:sub(obj_start + 1, obj_end - 1)
+
+  for key in tools_section:gmatch('"(.-)"%s*:%s*true') do
+    tools[key] = true
+  end
+
+  return tools
+end
+
 local function parse_openai_config(openai)
   local cfg = {}
   cfg.endpoint = U.json_get_string(openai, "endpoint")
@@ -12,6 +54,7 @@ local function parse_openai_config(openai)
   cfg.stream = U.json_get_bool(openai, "stream")
   cfg.ca_file = U.json_get_string(openai, "ca_file")
   cfg.verify_tls = U.json_get_bool(openai, "verify_tls")
+  cfg.tools = parse_tools_config(openai)
   return cfg
 end
 
@@ -26,6 +69,7 @@ local function parse_agent_config(raw)
   cfg.stream = U.json_get_bool(raw, "stream")
   cfg.ca_file = U.json_get_string(raw, "ca_file")
   cfg.verify_tls = U.json_get_bool(raw, "verify_tls")
+  cfg.tools = parse_tools_config(raw)
   return cfg
 end
 
@@ -53,6 +97,10 @@ local function merge_config(base, override)
   apply_value("stream")
   apply_value("verify_tls")
 
+  if override.tools then
+    base.tools = override.tools
+  end
+
   return base
 end
 
@@ -64,10 +112,33 @@ function M.load_config(agent_name)
     return nil, "配置文件不存在: " .. path
   end
 
-  local openai = raw:match('"openai"%s*:%s*%{(.-)%}')
-  if not openai then
+  local openai_start = raw:find('"openai"%s*:%s*%{')
+  if not openai_start then
     return nil, "配置缺少 openai 段"
   end
+
+  local obj_start = raw:find('%{', openai_start)
+  local depth = 0
+  local obj_end = obj_start
+
+  for i = obj_start, #raw do
+    local c = raw:sub(i, i)
+    if c == '{' then
+      depth = depth + 1
+    elseif c == '}' then
+      depth = depth - 1
+      if depth == 0 then
+        obj_end = i
+        break
+      end
+    end
+  end
+
+  if depth ~= 0 then
+    return nil, "配置格式错误：openai 部分未正确闭合"
+  end
+
+  local openai = raw:sub(obj_start + 1, obj_end - 1)
 
   local cfg = parse_openai_config(openai)
   cfg.timeout = cfg.timeout or 60
