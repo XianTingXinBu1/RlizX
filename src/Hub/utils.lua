@@ -29,6 +29,13 @@ function M.trim(s)
   return (s:gsub("^%s+", ""):gsub("%s+$", ""))
 end
 
+function M.url_encode(s)
+  return (tostring(s)
+    :gsub("[^%w%-_%.~]", function(c)
+      return string.format("%%%02X", string.byte(c))
+    end))
+end
+
 function M.parse_env_line(line)
   local s = M.trim(line)
   if s == "" or s:sub(1, 1) == "#" then return nil end
@@ -102,8 +109,6 @@ function M.json_get_bool(json, key)
 end
 
 function M.json_parse(json_str)
-  local result = {}
-
   local function parse_string(s, pos)
     local s_pos = s:find('"', pos)
     if not s_pos then return nil, pos end
@@ -207,7 +212,7 @@ function M.json_parse(json_str)
     end
   end
 
-  local value, end_pos = parse_value(json_str, 1)
+  local value, _ = parse_value(json_str, 1)
   return value
 end
 

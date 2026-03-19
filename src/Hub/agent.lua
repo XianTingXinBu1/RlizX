@@ -103,10 +103,17 @@ local function ensure_default_role_templates(agents_root, name)
   ensure_dir(agent_role_dir(agents_root, name))
 
   local templates = {
-    ["memorandum.md"] = "备忘录\n*在此文件记录重要信息，并按需更新*\n\n1.index\n  通过多轮问答逐步了解用户信息\n  每轮只问少量关键问题，避免一次性列出很多问题\n  将确认后的信息写入 role，并持续修订\n",
+    ["memorandum.md"] = "备忘录\n*在此文件记录重要信息，并按需更新*\n\n"
+      .. "1.index\n  通过多轮问答逐步了解用户信息\n"
+      .. "  每轮只问少量关键问题，避免一次性列出很多问题\n"
+      .. "  将确认后的信息写入 role，并持续修订\n",
     ["main.md"] = "主设定 - 我是谁？\n*在此文件持久化我的主要设定*\n\n\n1.我的名称：\n\n2.我的设定：\n\n3.\n",
     ["individuality.md"] = "个性设定 - 我的个性如何？\n*在此文件持久化我的个性设定*\n\n1.我的性别：\n\n2.我的个性：\n\n3.我的口头禅:\n\n4.我的风格：\n\n5.\n",
-    ["agent.md"] = "工作设定 - 我该如何工作？\n*此文件持久化工作类设定*\n\n1.我的主要提示词由memorandum、main、individuality、agent.md、user.md等role提示词构成\n\n2.我应该在需要时修订role提示词\n\n3.我应该尽可能的避免高危命令\n",
+    ["agent.md"] = "工作设定 - 我该如何工作？\n*此文件持久化工作类设定*\n\n"
+      .. "1.我的主要提示词由memorandum、main、individuality、agent.md、user.md"
+      .. "等role提示词构成\n\n"
+      .. "2.我应该在需要时修订role提示词\n\n"
+      .. "3.我应该尽可能的避免高危命令\n",
     ["user.md"] = "用户个性化记录 - 用户是怎样的？\n*在此文件持久化用户的画像*\n\n1.用户名称：\n\n2.用户的时区：\n\n3.用户的所在地：\n\n4.用户偏好：\n\n5.\n",
   }
 

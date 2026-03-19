@@ -129,9 +129,15 @@ function M.handle_request_result(input, agent_name, on_progress)
   end
 
   local base = U.script_dir()
-  local workspace_root = get_workspace_root(base, agent_name)
-  cfg.workspace_root = workspace_root
-  FileManager.set_workspace_root(workspace_root)
+
+  if type(cfg.workspace_root) ~= "string" or cfg.workspace_root == "" then
+    local workspace_root = get_workspace_root(base, agent_name)
+    cfg.workspace_root = workspace_root
+    FileManager.set_workspace_root(workspace_root)
+  end
+
+  cfg.agent_name = agent_name
+
   local initial_messages = build_messages(base, agent_name, input, cfg)
 
   local text, err2 = ToolExecutor.handle_tool_loop(
