@@ -6,3 +6,24 @@
 
 # agent local data (may contain secrets)
 /agents/**/.rlizx/
+
+# config files (may contain secrets)
+rlizx.config.json
+*.config.json
+
+# log files
+*.log
+telegram_bot.log
+
+# test files (temporary)
+test_*.lua
+demo_*.lua
+
+# documentation (already in repo)
+*.md
+
+# temporary files
+*.tmp
+*.bak
+*.swp
+*~

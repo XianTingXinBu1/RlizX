@@ -1,0 +1,1 @@
+{"api_key": "YOUR_OPENAI_API_KEY_HERE", "endpoint": "https://api.openai.com/v1/chat/completions", "model": "gpt-4", "provider": "openai", "temperature": 0.7, "telegram": {"bot_token": "YOUR_TELEGRAM_BOT_TOKEN_HERE"}}
