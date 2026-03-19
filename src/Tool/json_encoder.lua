@@ -1,4 +1,5 @@
 -- RlizX JSON Encoder
+-- 使用成熟的 cjson 库进行 JSON 编码
 
 local function get_script_dir()
   local info = debug.getinfo(1, "S")
@@ -16,57 +17,10 @@ if not M then
 
   local U = dofile(get_script_dir() .. "/../Hub/utils.lua")
 
-  local function is_array(t)
-    if type(t) ~= "table" then
-      return false
-    end
-    local max = 0
-    local count = 0
-    for k, _ in pairs(t) do
-      if type(k) ~= "number" or k < 1 or k % 1 ~= 0 then
-        return false
-      end
-      if k > max then
-        max = k
-      end
-      count = count + 1
-    end
-    return max == count
-  end
-
+  -- JSON 编码：Lua 表 -> JSON 字符串
+  -- 使用 cjson 库，支持完整的 JSON 标准和 Unicode
   function M.encode_json(v)
-    local tv = type(v)
-    if tv == "nil" then
-      return "null"
-    elseif tv == "boolean" then
-      return v and "true" or "false"
-    elseif tv == "number" then
-      return tostring(v)
-    elseif tv == "string" then
-      return '"' .. U.json_escape(v) .. '"'
-    elseif tv == "table" then
-      if is_array(v) then
-        local parts = {}
-        for i = 1, #v do
-          parts[#parts + 1] = M.encode_json(v[i])
-        end
-        return "[" .. table.concat(parts, ",") .. "]"
-      end
-
-      local keys = {}
-      for k, _ in pairs(v) do
-        keys[#keys + 1] = tostring(k)
-      end
-      table.sort(keys)
-
-      local parts = {}
-      for _, k in ipairs(keys) do
-        parts[#parts + 1] = string.format('"%s":%s', U.json_escape(k), M.encode_json(v[k]))
-      end
-      return "{" .. table.concat(parts, ",") .. "}"
-    end
-
-    return '""'
+    return U.json_encode(v)
   end
 
   package.loaded["rlizx.json_encoder"] = M

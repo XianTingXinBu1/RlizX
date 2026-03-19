@@ -39,52 +39,16 @@ function M.execute(name, arguments, context)
   return result
 end
 
--- JSON 编码（简化版）
+-- JSON 编码（使用 cjson）
 function M.encode_json(v)
-  local tv = type(v)
-  if tv == "nil" then
-    return "null"
-  elseif tv == "boolean" then
-    return v and "true" or "false"
-  elseif tv == "number" then
-    return tostring(v)
-  elseif tv == "string" then
-    return '"' .. v:gsub("\\", "\\\\"):gsub('"', '\\\"') .. '"'
-  elseif tv == "table" then
-    local is_array = #v > 0
-    local parts = {}
-    
-    if is_array then
-      for i = 1, #v do
-        parts[#parts + 1] = M.encode_json(v[i])
-      end
-      return "[" .. table.concat(parts, ",") .. "]"
-    else
-      local keys = {}
-      for k, _ in pairs(v) do
-        keys[#keys + 1] = k
-      end
-      table.sort(keys)
-      
-      for _, k in ipairs(keys) do
-        parts[#parts + 1] = '"' .. tostring(k) .. '":' .. M.encode_json(v[k])
-      end
-      return "{" .. table.concat(parts, ",") .. "}"
-    end
-  end
-  
-  return '""'
+  local U = dofile("src/Hub/utils.lua")
+  return U.json_encode(v)
 end
 
--- JSON 解码（简化版）
+-- JSON 解码（使用 cjson）
 function M.decode_json(s)
-  -- 简化版，实际应该使用更完整的解析器
-  -- 这里只处理简单的 JSON
-  local ok, data = pcall(loadstring or load, "return " .. s)
-  if ok and type(data) == "function" then
-    return data()
-  end
-  return nil
+  local U = dofile("src/Hub/utils.lua")
+  return U.json_parse(s)
 end
 
 return M

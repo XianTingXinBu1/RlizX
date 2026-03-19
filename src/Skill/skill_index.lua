@@ -31,56 +31,8 @@ end
 function M.save_index(base_dir, index_data)
     local index_path = get_index_path(base_dir)
 
-    -- 简单的 JSON 编码（仅支持基本类型）
-    local function encode_json(data, indent)
-        indent = indent or ""
-        local t = type(data)
-
-        if t == "nil" then
-            return "null"
-        elseif t == "boolean" then
-            return data and "true" or "false"
-        elseif t == "number" then
-            return tostring(data)
-        elseif t == "string" then
-            return '"' .. U.json_escape(data) .. '"'
-        elseif t == "table" then
-            local is_array = true
-            local i = 1
-            for k, _ in pairs(data) do
-                if k ~= i then
-                    is_array = false
-                    break
-                end
-                i = i + 1
-            end
-
-            local parts = {}
-            if is_array then
-                for _, item in ipairs(data) do
-                        parts[#parts + 1] = encode_json(item, indent .. "  ")
-                      end                return "[" .. (#parts > 0 and "\n" .. indent .. "  " or "") ..
-                       table.concat(parts, ",\n" .. indent .. "  ") ..
-                       (#parts > 0 and "\n" .. indent or "") .. "]"
-            else
-                local keys = {}
-                for k in pairs(data) do
-                    keys[#keys + 1] = k
-                end
-                table.sort(keys)
-
-                for _, k in ipairs(keys) do
-                    parts[#parts + 1] = indent .. "  " .. encode_json(k, indent .. "  ") .. ": " ..
-                                          encode_json(data[k], indent .. "  ")
-                end
-                return "{\n" .. table.concat(parts, ",\n") .. "\n" .. indent .. "}"
-            end
-        end
-
-        return "null"
-    end
-
-    local json_content = encode_json(index_data)
+    -- 使用 cjson 编码 JSON
+    local json_content = U.json_encode(index_data)
 
     return U.write_file(index_path, json_content)
 end

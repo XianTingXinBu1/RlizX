@@ -163,4 +163,55 @@ Registry.register("list_cron_jobs", {
   return { result = table.concat(lines, "\n") }
 end)
 
+-- 加载 Shell 操作工具
+local ShellOps = dofile(base_dir .. "/shell_ops.lua")
+
+Registry.register("shell_execute", {
+  name = "shell_execute",
+  description = "执行 shell 命令（支持安全检查和超时控制）",
+  inputSchema = {
+    type = "object",
+    properties = {
+      command = { type = "string", description = "要执行的命令" },
+      working_dir = { type = "string", description = "工作目录（可选）" },
+      timeout = { type = "number", description = "超时时间（秒，默认30）" }
+    },
+    required = {"command"}
+  }
+}, ShellOps.execute)
+
+Registry.register("shell_getenv", {
+  name = "shell_getenv",
+  description = "获取环境变量",
+  inputSchema = {
+    type = "object",
+    properties = {
+      name = { type = "string", description = "环境变量名（不指定则列出所有）" }
+    },
+    required = {}
+  }
+}, ShellOps.getenv)
+
+Registry.register("shell_which", {
+  name = "shell_which",
+  description = "检查命令是否存在",
+  inputSchema = {
+    type = "object",
+    properties = {
+      command = { type = "string", description = "要检查的命令" }
+    },
+    required = {"command"}
+  }
+}, ShellOps.which)
+
+Registry.register("shell_pwd", {
+  name = "shell_pwd",
+  description = "获取当前工作目录",
+  inputSchema = {
+    type = "object",
+    properties = {},
+    required = {}
+  }
+}, ShellOps.pwd)
+
 return Registry

@@ -7,7 +7,7 @@ local message_queue = {}
 
 -- 发送消息
 function M.send(agent_name, message, config)
-  local Loop = require("rlizx.agent.loop")
+  local Loop = dofile("agent/loop.lua")
   
   local response, err = Loop.run(agent_name, message, config)
   

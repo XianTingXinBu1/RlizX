@@ -108,112 +108,29 @@ function M.json_get_bool(json, key)
   return nil
 end
 
+-- 使用成熟的 cjson 库进行 JSON 解析和编码
+local cjson_ok, cjson = pcall(require, "cjson")
+
+if not cjson_ok then
+  error("Failed to load cjson library. Please install: apt-get install lua-cjson")
+end
+
+-- JSON 解析：JSON 字符串 -> Lua 表
 function M.json_parse(json_str)
-  local function parse_string(s, pos)
-    local s_pos = s:find('"', pos)
-    if not s_pos then return nil, pos end
-    local e_pos = s_pos
-    while true do
-      e_pos = s:find('"', e_pos + 1)
-      if not e_pos then return nil, pos end
-      local bs_count = 0
-      local i = e_pos - 1
-      while i >= s_pos and s:sub(i, i) == "\\" do
-        bs_count = bs_count + 1
-        i = i - 1
-      end
-      if bs_count % 2 == 0 then
-        break
-      end
-    end
-    local str = s:sub(s_pos + 1, e_pos - 1)
-    str = str:gsub('\\"', '"'):gsub("\\n", "\n"):gsub("\\r", "\r"):gsub("\\t", "\t"):gsub("\\\\", "\\")
-    return str, e_pos + 1
+  local ok, result = pcall(cjson.decode, json_str)
+  if not ok then
+    return nil, result
   end
+  return result
+end
 
-  local function parse_number(s, pos)
-    local num_str = s:match("^[%d%.%+%-eE]+", pos)
-    if not num_str then return nil, pos end
-    return tonumber(num_str), pos + #num_str
+-- JSON 编码：Lua 表 -> JSON 字符串
+function M.json_encode(value)
+  local ok, result = pcall(cjson.encode, value)
+  if not ok then
+    return nil, result
   end
-
-  local function parse_literal(s, pos)
-    if s:sub(pos, pos + 3) == "true" then
-      return true, pos + 4
-    elseif s:sub(pos, pos + 4) == "false" then
-      return false, pos + 5
-    elseif s:sub(pos, pos + 3) == "null" then
-      return nil, pos + 4
-    end
-    return nil, pos
-  end
-
-  local function skip_ws(s, pos)
-    while pos <= #s and s:sub(pos, pos):match("%s") do
-      pos = pos + 1
-    end
-    return pos
-  end
-
-  local function parse_value(s, pos)
-    pos = skip_ws(s, pos)
-    if pos > #s then return nil, pos end
-
-    local c = s:sub(pos, pos)
-    if c == '"' then
-      return parse_string(s, pos)
-    elseif c == "{" then
-      local obj = {}
-      pos = pos + 1
-      pos = skip_ws(s, pos)
-      if s:sub(pos, pos) == "}" then
-        return obj, pos + 1
-      end
-      while true do
-        pos = skip_ws(s, pos)
-        if s:sub(pos, pos) ~= '"' then return nil, pos end
-        local key, new_pos = parse_string(s, pos)
-        if not key then return nil, pos end
-        pos = skip_ws(s, new_pos)
-        if s:sub(pos, pos) ~= ":" then return nil, pos end
-        pos = pos + 1
-        local val, new_pos2 = parse_value(s, pos)
-        if val == nil and new_pos2 == pos then return nil, pos end
-        obj[key] = val
-        pos = skip_ws(s, new_pos2)
-        if s:sub(pos, pos) == "}" then
-          return obj, pos + 1
-        end
-        if s:sub(pos, pos) ~= "," then return nil, pos end
-        pos = pos + 1
-      end
-    elseif c == "[" then
-      local arr = {}
-      pos = pos + 1
-      pos = skip_ws(s, pos)
-      if s:sub(pos, pos) == "]" then
-        return arr, pos + 1
-      end
-      while true do
-        local val, new_pos = parse_value(s, pos)
-        if val == nil and new_pos == pos then return nil, pos end
-        arr[#arr + 1] = val
-        pos = skip_ws(s, new_pos)
-        if s:sub(pos, pos) == "]" then
-          return arr, pos + 1
-        end
-        if s:sub(pos, pos) ~= "," then return nil, pos end
-        pos = pos + 1
-      end
-    elseif c:match("[%d%.%+%-]") then
-      return parse_number(s, pos)
-    else
-      return parse_literal(s, pos)
-    end
-  end
-
-  local value, _ = parse_value(json_str, 1)
-  return value
+  return result
 end
 
 return M
