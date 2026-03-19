@@ -20,6 +20,22 @@ if not M then
     return (tostring(s or ""):match("^%s*(.-)%s*$"))
   end
 
+  local function make_error(code, message, detail)
+    return {
+      ok = false,
+      code = tostring(code or "UNKNOWN"),
+      message = tostring(message or "unknown error"),
+      detail = detail,
+    }
+  end
+
+  local function make_ok(data)
+    return {
+      ok = true,
+      data = data,
+    }
+  end
+
   local function is_array(t)
     if type(t) ~= "table" then
       return false
@@ -232,7 +248,7 @@ if not M then
     return tostring(v)
   end
 
-  function M.execute_single_tool(tool_call, on_progress)
+  function M.execute_single_tool(tool_call, on_progress, context)
     if on_progress then
       on_progress(string.format("\n[Tool] 调用: %s", tostring(tool_call.name)))
       on_progress(string.format("[Tool] 参数: %s", tostring(tool_call.arguments or "{}")))
@@ -246,7 +262,7 @@ if not M then
     if not parsed_args then
       result = { error = "Invalid tool arguments: " .. tostring(parse_err) }
     else
-      local ok, call_result = pcall(Registry.execute_tool, tool_call.name, parsed_args)
+      local ok, call_result = pcall(Registry.execute_tool, tool_call.name, parsed_args, context or {})
       if not ok then
         result = { error = "Tool execution error: " .. tostring(call_result) }
       else
@@ -310,11 +326,15 @@ if not M then
     return message
   end
 
-  function M.handle_tool_loop(initial_messages, http_request_fn, cfg, on_progress)
+  function M.handle_tool_loop_result(initial_messages, http_request_fn, cfg, on_progress)
     local messages = {}
     for i, msg in ipairs(initial_messages or {}) do
       messages[i] = msg
     end
+
+    local context = {
+      workspace_root = cfg and cfg.workspace_root,
+    }
 
     local max_iterations = 5
     local iteration = 0
@@ -324,12 +344,12 @@ if not M then
 
       local assistant_message, err = get_round_message(messages, cfg, http_request_fn)
       if not assistant_message then
-        return nil, err
+        return make_error("ROUND_REQUEST_FAILED", "请求模型失败", err)
       end
 
       local tool_calls = normalize_tool_calls(assistant_message.tool_calls)
       if #tool_calls == 0 then
-        return message_to_text(assistant_message)
+        return make_ok(message_to_text(assistant_message))
       end
 
       if on_progress then
@@ -342,12 +362,23 @@ if not M then
       }
 
       for _, tool_call in ipairs(tool_calls) do
-        local tool_response = M.execute_single_tool(tool_call, on_progress)
+        local tool_response = M.execute_single_tool(tool_call, on_progress, context)
         messages[#messages + 1] = tool_response
       end
     end
 
-    return nil, "工具调用循环超过最大迭代次数"
+    return make_error("TOOL_LOOP_MAX_ITERATIONS", "工具调用循环超过最大迭代次数", max_iterations)
+  end
+
+  function M.handle_tool_loop(initial_messages, http_request_fn, cfg, on_progress)
+    local result = M.handle_tool_loop_result(initial_messages, http_request_fn, cfg, on_progress)
+    if result.ok then
+      return result.data
+    end
+    if result.detail ~= nil then
+      return nil, string.format("[%s] %s: %s", tostring(result.code), tostring(result.message), tostring(result.detail))
+    end
+    return nil, string.format("[%s] %s", tostring(result.code), tostring(result.message))
   end
 
   function M.build_payload_with_tools(messages, cfg)

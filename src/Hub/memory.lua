@@ -22,6 +22,33 @@ local function ensure_dir(path)
   os.execute("mkdir -p " .. path)
 end
 
+local function decode_memory_list(raw)
+  if not raw or raw == "" then
+    return {}
+  end
+
+  local ok, parsed = pcall(U.json_parse, raw)
+  if not ok or type(parsed) ~= "table" then
+    return {}
+  end
+
+  local list = {}
+  for _, item in ipairs(parsed) do
+    if type(item) == "table" then
+      local role = item.role
+      local content = item.content
+      if type(role) == "string" and type(content) == "string" then
+        list[#list + 1] = {
+          role = role,
+          content = content,
+        }
+      end
+    end
+  end
+
+  return list
+end
+
 function M.read_role_text(base, agent_name)
   if not agent_name or agent_name == "" then return nil end
   local parts = {}
@@ -48,20 +75,7 @@ end
 function M.read_memory_list(base, agent_name)
   if not agent_name or agent_name == "" then return {} end
   local raw = U.read_file(agent_memory_path(base, agent_name))
-  if not raw or raw == "" then return {} end
-
-  local list = {}
-  for obj in raw:gmatch("%b{}") do
-    local role = obj:match('"role"%s*:%s*"(.-)"')
-    local content = obj:match('"content"%s*:%s*"(.-)"')
-    if role and content then
-      list[#list + 1] = {
-        role = U.json_unescape(role),
-        content = U.json_unescape(content)
-      }
-    end
-  end
-  return list
+  return decode_memory_list(raw)
 end
 
 function M.save_memory_list(base, agent_name, list)
@@ -86,19 +100,7 @@ local function load_memory_list(base, agent_name)
   end
 
   local raw = U.read_file(agent_memory_path(base, agent_name))
-  local list = {}
-  if raw and raw ~= "" then
-    for obj in raw:gmatch("%b{}") do
-      local role = obj:match('"role"%s*:%s*"(.-)"')
-      local content = obj:match('"content"%s*:%s*"(.-)"')
-      if role and content then
-        list[#list + 1] = {
-          role = U.json_unescape(role),
-          content = U.json_unescape(content)
-        }
-      end
-    end
-  end
+  local list = decode_memory_list(raw)
 
   memory_cache[agent_name] = list
   return list

@@ -2,74 +2,80 @@ local U = dofile(require("debug").getinfo(1, "S").source:sub(2):match("^(.*)/") 
 
 local M = {}
 
-local function parse_tools_config(json)
+local function parse_tools_config(obj)
   local tools = {}
-
-  local tools_start = json:find('"tools"')
-  if not tools_start then
+  if type(obj) ~= "table" then
     return tools
   end
 
-  local obj_start = json:find('%{', tools_start)
-  if not obj_start then
-    return tools
-  end
-
-  local depth = 0
-  local obj_end = obj_start
-
-  for i = obj_start, #json do
-    local c = json:sub(i, i)
-    if c == '{' then
-      depth = depth + 1
-    elseif c == '}' then
-      depth = depth - 1
-      if depth == 0 then
-        obj_end = i
-        break
-      end
+  for key, value in pairs(obj) do
+    if type(key) == "string" and value == true then
+      tools[key] = true
     end
-  end
-
-  if depth ~= 0 then
-    return tools
-  end
-
-  local tools_section = json:sub(obj_start + 1, obj_end - 1)
-
-  for key in tools_section:gmatch('"(.-)"%s*:%s*true') do
-    tools[key] = true
   end
 
   return tools
 end
 
+local function parse_tool_permissions(obj)
+  local permissions = {
+    read = true,
+    write = true,
+    git = true,
+  }
+
+  if type(obj) ~= "table" then
+    return permissions
+  end
+
+  if obj.read ~= nil then
+    permissions.read = obj.read == true
+  end
+  if obj.write ~= nil then
+    permissions.write = obj.write == true
+  end
+  if obj.git ~= nil then
+    permissions.git = obj.git == true
+  end
+
+  return permissions
+end
+
 local function parse_openai_config(openai)
   local cfg = {}
-  cfg.endpoint = U.json_get_string(openai, "endpoint")
-  cfg.api_key = U.json_get_string(openai, "api_key")
-  cfg.model = U.json_get_string(openai, "model")
-  cfg.timeout = U.json_get_number(openai, "timeout")
-  cfg.temperature = U.json_get_number(openai, "temperature")
-  cfg.stream = U.json_get_bool(openai, "stream")
-  cfg.ca_file = U.json_get_string(openai, "ca_file")
-  cfg.verify_tls = U.json_get_bool(openai, "verify_tls")
-  cfg.tools = parse_tools_config(openai)
+  if type(openai) ~= "table" then
+    return cfg
+  end
+
+  cfg.endpoint = openai.endpoint
+  cfg.api_key = openai.api_key
+  cfg.model = openai.model
+  cfg.timeout = openai.timeout
+  cfg.temperature = openai.temperature
+  cfg.stream = openai.stream
+  cfg.ca_file = openai.ca_file
+  cfg.verify_tls = openai.verify_tls
+  cfg.tools = parse_tools_config(openai.tools)
+  cfg.tool_permissions = parse_tool_permissions(openai.tool_permissions)
   return cfg
 end
 
 local function parse_agent_config(raw)
-  if not raw then return nil end
+  if type(raw) ~= "table" then
+    return nil
+  end
+
   local cfg = {}
-  cfg.endpoint = U.json_get_string(raw, "endpoint")
-  cfg.api_key = U.json_get_string(raw, "api_key")
-  cfg.model = U.json_get_string(raw, "model")
-  cfg.timeout = U.json_get_number(raw, "timeout")
-  cfg.temperature = U.json_get_number(raw, "temperature")
-  cfg.stream = U.json_get_bool(raw, "stream")
-  cfg.ca_file = U.json_get_string(raw, "ca_file")
-  cfg.verify_tls = U.json_get_bool(raw, "verify_tls")
-  cfg.tools = parse_tools_config(raw)
+  cfg.endpoint = raw.endpoint
+  cfg.api_key = raw.api_key
+  cfg.model = raw.model
+  cfg.timeout = raw.timeout
+  cfg.temperature = raw.temperature
+  cfg.stream = raw.stream
+  cfg.ca_file = raw.ca_file
+  cfg.verify_tls = raw.verify_tls
+  cfg.tools = parse_tools_config(raw.tools)
+  cfg.tool_permissions = parse_tool_permissions(raw.tool_permissions)
   return cfg
 end
 
@@ -77,7 +83,7 @@ local function merge_config(base, override)
   if not override then return base end
 
   local function apply_string(key)
-    if override[key] and override[key] ~= "" then
+    if type(override[key]) == "string" and override[key] ~= "" then
       base[key] = override[key]
     end
   end
@@ -97,8 +103,12 @@ local function merge_config(base, override)
   apply_value("stream")
   apply_value("verify_tls")
 
-  if override.tools then
+  if type(override.tools) == "table" then
     base.tools = override.tools
+  end
+
+  if type(override.tool_permissions) == "table" then
+    base.tool_permissions = override.tool_permissions
   end
 
   return base
@@ -112,46 +122,34 @@ function M.load_config(agent_name)
     return nil, "配置文件不存在: " .. path
   end
 
-  local openai_start = raw:find('"openai"%s*:%s*%{')
-  if not openai_start then
+  local ok_parse, parsed = pcall(U.json_parse, raw)
+  if not ok_parse or type(parsed) ~= "table" then
+    return nil, "配置文件 JSON 解析失败"
+  end
+
+  local openai = parsed.openai
+  if type(openai) ~= "table" then
     return nil, "配置缺少 openai 段"
   end
 
-  local obj_start = raw:find('%{', openai_start)
-  local depth = 0
-  local obj_end = obj_start
-
-  for i = obj_start, #raw do
-    local c = raw:sub(i, i)
-    if c == '{' then
-      depth = depth + 1
-    elseif c == '}' then
-      depth = depth - 1
-      if depth == 0 then
-        obj_end = i
-        break
-      end
-    end
-  end
-
-  if depth ~= 0 then
-    return nil, "配置格式错误：openai 部分未正确闭合"
-  end
-
-  local openai = raw:sub(obj_start + 1, obj_end - 1)
-
   local cfg = parse_openai_config(openai)
-  cfg.timeout = cfg.timeout or 60
-  cfg.temperature = cfg.temperature or 0.2
+  cfg.timeout = tonumber(cfg.timeout) or 60
+  cfg.temperature = tonumber(cfg.temperature) or 0.2
   cfg.stream = cfg.stream == true
   cfg.verify_tls = cfg.verify_tls == true
+  if type(cfg.tool_permissions) ~= "table" then
+    cfg.tool_permissions = parse_tool_permissions(nil)
+  end
 
   if agent_name and agent_name ~= "" then
     local agent_path = base .. "/../../agents/" .. agent_name .. "/.rlizx/config.json"
     local agent_raw = U.read_file(agent_path)
     if agent_raw then
-      local agent_cfg = parse_agent_config(agent_raw)
-      cfg = merge_config(cfg, agent_cfg)
+      local ok_agent_parse, agent_parsed = pcall(U.json_parse, agent_raw)
+      if ok_agent_parse and type(agent_parsed) == "table" then
+        local agent_cfg = parse_agent_config(agent_parsed)
+        cfg = merge_config(cfg, agent_cfg)
+      end
     end
   end
 
@@ -177,13 +175,13 @@ function M.load_config(agent_name)
     end
   end
 
-  if not cfg.endpoint or cfg.endpoint == "" then
+  if type(cfg.endpoint) ~= "string" or cfg.endpoint == "" then
     return nil, "openai.endpoint 未配置"
   end
-  if not cfg.api_key or cfg.api_key == "" then
+  if type(cfg.api_key) ~= "string" or cfg.api_key == "" then
     return nil, "openai.api_key 未配置"
   end
-  if not cfg.model or cfg.model == "" then
+  if type(cfg.model) ~= "string" or cfg.model == "" then
     return nil, "openai.model 未配置"
   end
 

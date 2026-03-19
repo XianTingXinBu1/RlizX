@@ -504,6 +504,76 @@ REPL 指令:
     end
   end
 
+  local function handle_chat_line(line)
+    if not agent_manager.current_agent then
+      io.stdout:write("请先使用 /switch <名称> 选择或创建 agent。\n")
+      return
+    end
+
+    io.stdout:write(string.format("[状态] 正在请求 agent: %s\n", agent_manager.current_agent))
+
+    local okm1, errm1 = pcall(gateway.append_memory, agent_manager.current_agent, "user", line)
+    if not okm1 and errm1 then
+      io.stdout:write("[Gateway Memory Error] " .. tostring(errm1) .. "\n")
+    end
+
+    local function on_tool_progress(msg)
+      io.stdout:write(msg .. "\n")
+      io.stdout:flush()
+    end
+
+    restore_mode(stty_state)
+    local ok2, resp = pcall(gateway.handle_input, line, agent_manager.current_agent, on_tool_progress)
+    set_raw_mode()
+
+    if not ok2 then
+      io.stdout:write("[Gateway Error] " .. tostring(resp) .. "\n")
+      return
+    end
+
+    if resp == nil then
+      io.stdout:write("[状态] 请求完成，但未返回可显示内容。\n")
+      return
+    end
+
+    local output = tostring(resp)
+    local cfg_mod = dofile(base .. "/../Hub/config.lua")
+    local cfg = cfg_mod.load_config(agent_manager.current_agent)
+    local is_stream = cfg and cfg.stream or false
+
+    if output == "" then
+      io.stdout:write("[状态] 请求完成，但未返回可显示内容。\n")
+      return
+    end
+
+    if not is_stream then
+      io.stdout:write(output .. "\n")
+    end
+
+    local okm2, errm2 = pcall(gateway.append_memory, agent_manager.current_agent, "assistant", output)
+    if not okm2 and errm2 then
+      io.stdout:write("[Gateway Memory Error] " .. tostring(errm2) .. "\n")
+    end
+  end
+
+  local function handle_input_line(line)
+    if line == "" then
+      return true
+    end
+
+    local cmd = parse_command(line)
+    if cmd then
+      local okc, flag = handle_command(cmd)
+      if okc == false and flag == "exit" then
+        return false
+      end
+      return true
+    end
+
+    handle_chat_line(line)
+    return true
+  end
+
   local ok, err = pcall(function()
     while true do
       local active_agent = agent_manager.current_agent or "default"
@@ -521,59 +591,9 @@ REPL 指令:
         history[#history + 1] = line
       end
 
-      if line ~= "" then
-        local cmd = parse_command(line)
-        if cmd then
-          local okc, flag = handle_command(cmd)
-          if okc == false and flag == "exit" then
-            break
-          end
-        else
-          if not agent_manager.current_agent then
-            io.stdout:write("请先使用 /switch <名称> 选择或创建 agent。\n")
-          else
-            io.stdout:write(string.format("[状态] 正在请求 agent: %s\n", agent_manager.current_agent))
-
-            local okm1, errm1 = pcall(gateway.append_memory, agent_manager.current_agent, "user", line)
-            if not okm1 and errm1 then
-              io.stdout:write("[Gateway Memory Error] " .. tostring(errm1) .. "\n")
-            end
-
-            local function on_tool_progress(msg)
-              io.stdout:write(msg .. "\n")
-              io.stdout:flush()
-            end
-
-            restore_mode(stty_state)
-            local ok2, resp = pcall(gateway.handle_input, line, agent_manager.current_agent, on_tool_progress)
-            set_raw_mode()
-
-            if ok2 then
-              if resp ~= nil then
-                local output = tostring(resp)
-                local cfg_mod = dofile(base .. "/../Hub/config.lua")
-                local cfg = cfg_mod.load_config(agent_manager.current_agent)
-                local is_stream = cfg and cfg.stream or false
-
-                if output ~= "" then
-                  if not is_stream then
-                    io.stdout:write(output .. "\n")
-                  end
-                  local okm2, errm2 = pcall(gateway.append_memory, agent_manager.current_agent, "assistant", output)
-                  if not okm2 and errm2 then
-                    io.stdout:write("[Gateway Memory Error] " .. tostring(errm2) .. "\n")
-                  end
-                else
-                  io.stdout:write("[状态] 请求完成，但未返回可显示内容。\n")
-                end
-              else
-                io.stdout:write("[状态] 请求完成，但未返回可显示内容。\n")
-              end
-            else
-              io.stdout:write("[Gateway Error] " .. tostring(resp) .. "\n")
-            end
-          end
-        end
+      local should_continue = handle_input_line(line)
+      if should_continue == false then
+        break
       end
     end
   end)

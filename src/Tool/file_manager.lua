@@ -39,13 +39,11 @@ if not M then
 
     local parts = {}
     for seg in p:gmatch("[^/]+") do
-      if seg == "." or seg == "" then
-        -- ignore
-      elseif seg == ".." then
+      if seg == ".." then
         if #parts > 0 then
           table.remove(parts)
         end
-      else
+      elseif seg ~= "." and seg ~= "" then
         parts[#parts + 1] = seg
       end
     end
@@ -89,11 +87,14 @@ if not M then
     return active_root
   end
 
-  local function get_project_root()
+  local function get_project_root(context)
+    if type(context) == "table" and type(context.workspace_root) == "string" and context.workspace_root ~= "" then
+      return collapse_path(context.workspace_root)
+    end
     return active_root or default_project_root()
   end
 
-  local function normalize_path(path)
+  local function normalize_path(path, context)
     local p = tostring(path or "")
     p = p:gsub("\\", "/")
 
@@ -105,10 +106,54 @@ if not M then
       return collapse_path(p)
     end
 
-    return collapse_path(get_project_root() .. "/" .. p)
+    return collapse_path(get_project_root(context) .. "/" .. p)
   end
 
-  local function is_path_safe(path)
+  local function shell_quote(s)
+    return string.format("%q", tostring(s or ""))
+  end
+
+  local resolve_realpath
+  local is_within_root
+
+  resolve_realpath = function(path)
+    local quoted = shell_quote(path)
+    local p = io.popen("readlink -f " .. quoted .. " 2>/dev/null")
+    if p then
+      local out = p:read("*l")
+      p:close()
+      if out and out ~= "" then
+        return collapse_path(out)
+      end
+    end
+
+    local cmd = "python3 -c "
+      .. shell_quote("import os,sys; print(os.path.realpath(sys.argv[1]))")
+      .. " " .. quoted .. " 2>/dev/null"
+    local p2 = io.popen(cmd)
+    if not p2 then
+      return nil
+    end
+    local out2 = p2:read("*l")
+    p2:close()
+    if out2 and out2 ~= "" then
+      return collapse_path(out2)
+    end
+
+    return nil
+  end
+
+  is_within_root = function(real_root, real_path)
+    if not real_root or not real_path then
+      return false
+    end
+    if real_path == real_root then
+      return true
+    end
+    return real_path:sub(1, #real_root + 1) == (real_root .. "/")
+  end
+
+  local function is_path_safe(path, context)
     if type(path) ~= "string" then
       return false, "路径必须是字符串"
     end
@@ -116,22 +161,32 @@ if not M then
       return false, "路径包含非法字符"
     end
 
-    local root = get_project_root()
-    local resolved = normalize_path(path)
+    local root = get_project_root(context)
+    local resolved = normalize_path(path, context)
 
-    if resolved == root then
+    if not (resolved == root or resolved:sub(1, #root + 1) == (root .. "/")) then
+      return false, "路径超出项目根目录"
+    end
+
+    local real_root = resolve_realpath(root) or root
+    local real_target = resolve_realpath(resolved)
+
+    if not real_target then
+      local parent = resolved:match("^(.*)/")
+      if parent and parent ~= "" then
+        local real_parent = resolve_realpath(parent)
+        if real_parent and not is_within_root(real_root, real_parent) then
+          return false, "路径超出项目根目录(软链接)"
+        end
+      end
       return true, resolved
     end
 
-    if resolved:sub(1, #root + 1) == (root .. "/") then
-      return true, resolved
+    if not is_within_root(real_root, real_target) then
+      return false, "路径超出项目根目录(软链接)"
     end
 
-    return false, "路径超出项目根目录"
-  end
-
-  local function shell_quote(s)
-    return string.format("%q", tostring(s or ""))
+    return true, resolved
   end
 
   local function path_is_dir(path)
@@ -156,8 +211,8 @@ if not M then
     return items
   end
 
-  local function to_relative(abs_path)
-    local root = get_project_root()
+  local function to_relative(abs_path, context)
+    local root = get_project_root(context)
     if abs_path == root then
       return "."
     end
@@ -283,13 +338,13 @@ if not M then
     return table.concat(out), count
   end
 
-  function M.read_file(args)
+  function M.read_file(args, context)
     local path = args and args.path
     if not path or path == "" then
       return { error = "缺少必需参数: path" }
     end
 
-    local safe, resolved = is_path_safe(path)
+    local safe, resolved = is_path_safe(path, context)
     if not safe then
       return { error = resolved }
     end
@@ -305,7 +360,7 @@ if not M then
     return { result = content or "" }
   end
 
-  function M.write_file(args)
+  function M.write_file(args, context)
     local path = args and args.path
     local content = args and args.content
 
@@ -316,7 +371,7 @@ if not M then
       return { error = "缺少必需参数: content" }
     end
 
-    local safe, resolved = is_path_safe(path)
+    local safe, resolved = is_path_safe(path, context)
     if not safe then
       return { error = resolved }
     end
@@ -334,10 +389,10 @@ if not M then
     return { result = "文件写入成功" }
   end
 
-  function M.list_files(args)
+  function M.list_files(args, context)
     local path = (args and args.path) or "."
 
-    local safe, resolved = is_path_safe(path)
+    local safe, resolved = is_path_safe(path, context)
     if not safe then
       return { error = resolved }
     end
@@ -355,7 +410,7 @@ if not M then
     return { result = table.concat(items, "\n") }
   end
 
-  function M.search_files(args)
+  function M.search_files(args, context)
     local query = args and args.query
     local path = (args and args.path) or "."
     local is_regex = args and args.is_regex == true
@@ -369,7 +424,7 @@ if not M then
     if max_results < 1 then max_results = 1 end
     if max_results > 200 then max_results = 200 end
 
-    local safe, resolved = is_path_safe(path)
+    local safe, resolved = is_path_safe(path, context)
     if not safe then
       return { error = resolved }
     end
@@ -414,9 +469,6 @@ if not M then
       if content and content ~= "" then
         local line_no = 0
         for line in content:gmatch("([^\n]*)\n?") do
-          if line == "" and line_no > 0 and #line == 0 then
-            -- keep behavior stable on trailing newline
-          end
           line_no = line_no + 1
 
           local target = line
@@ -424,7 +476,7 @@ if not M then
             target = target:lower()
           end
 
-          local hit = false
+          local hit
           if is_regex then
             hit = target:find(q) ~= nil
           else
@@ -433,7 +485,7 @@ if not M then
 
           if hit then
             matches[#matches + 1] = {
-              path = to_relative(file),
+              path = to_relative(file, context),
               line = line_no,
               text = line,
             }
@@ -452,7 +504,7 @@ if not M then
     return { result = matches }
   end
 
-  function M.patch_file(args)
+  function M.patch_file(args, context)
     local path = args and args.path
     local old_text = args and args.old_text
     local new_text = args and args.new_text
@@ -471,7 +523,7 @@ if not M then
       return { error = "old_text 不能为空" }
     end
 
-    local safe, resolved = is_path_safe(path)
+    local safe, resolved = is_path_safe(path, context)
     if not safe then
       return { error = resolved }
     end
@@ -506,7 +558,7 @@ if not M then
     return { result = { replacements = count } }
   end
 
-  function M.read_json(args)
+  function M.read_json(args, context)
     local path = args and args.path
     local key_path = args and args.key_path
 
@@ -514,7 +566,7 @@ if not M then
       return { error = "缺少必需参数: path" }
     end
 
-    local safe, resolved = is_path_safe(path)
+    local safe, resolved = is_path_safe(path, context)
     if not safe then
       return { error = resolved }
     end
@@ -552,7 +604,7 @@ if not M then
     return { result = cur }
   end
 
-  function M.write_json_key(args)
+  function M.write_json_key(args, context)
     local path = args and args.path
     local key_path = args and args.key_path
     local value = args and args.value
@@ -565,7 +617,7 @@ if not M then
       return { error = "缺少必需参数: key_path" }
     end
 
-    local safe, resolved = is_path_safe(path)
+    local safe, resolved = is_path_safe(path, context)
     if not safe then
       return { error = resolved }
     end
@@ -612,9 +664,9 @@ if not M then
     return { result = { updated = true } }
   end
 
-  function M.git_status(args)
+  function M.git_status(args, context)
     local short = not (args and args.short == false)
-    local root = get_project_root()
+    local root = get_project_root(context)
     local cmd
 
     if short then
@@ -631,10 +683,10 @@ if not M then
     return { result = out }
   end
 
-  function M.git_diff(args)
+  function M.git_diff(args, context)
     local staged = args and args.staged == true
     local path = args and args.path
-    local root = get_project_root()
+    local root = get_project_root(context)
 
     local cmd = "cd " .. shell_quote(root) .. " && git diff"
     if staged then
@@ -642,11 +694,11 @@ if not M then
     end
 
     if path and path ~= "" then
-      local safe, resolved = is_path_safe(path)
+      local safe, resolved = is_path_safe(path, context)
       if not safe then
         return { error = resolved }
       end
-      local rel = to_relative(resolved)
+      local rel = to_relative(resolved, context)
       if rel ~= "." then
         cmd = cmd .. " -- " .. shell_quote(rel)
       end
@@ -682,7 +734,7 @@ local function register_file_tools()
         required = { "path" },
       },
     },
-  }, M.read_file)
+  }, M.read_file, { category = "read" })
 
   Registry.register_tool("write_file", {
     type = "function",
@@ -704,7 +756,7 @@ local function register_file_tools()
         required = { "path", "content" },
       },
     },
-  }, M.write_file)
+  }, M.write_file, { category = "write" })
 
   Registry.register_tool("list_files", {
     type = "function",
@@ -722,7 +774,7 @@ local function register_file_tools()
         required = {},
       },
     },
-  }, M.list_files)
+  }, M.list_files, { category = "read" })
 
   Registry.register_tool("search_files", {
     type = "function",
@@ -756,7 +808,7 @@ local function register_file_tools()
         required = { "query" },
       },
     },
-  }, M.search_files)
+  }, M.search_files, { category = "read" })
 
   Registry.register_tool("patch_file", {
     type = "function",
@@ -786,7 +838,7 @@ local function register_file_tools()
         required = { "path", "old_text", "new_text" },
       },
     },
-  }, M.patch_file)
+  }, M.patch_file, { category = "write" })
 
   Registry.register_tool("read_json", {
     type = "function",
@@ -808,7 +860,7 @@ local function register_file_tools()
         required = { "path" },
       },
     },
-  }, M.read_json)
+  }, M.read_json, { category = "read" })
 
   Registry.register_tool("write_json_key", {
     type = "function",
@@ -838,7 +890,7 @@ local function register_file_tools()
         required = { "path", "key_path", "value" },
       },
     },
-  }, function(args)
+  }, function(args, context)
     local Utils = dofile(get_script_dir() .. "/../Hub/utils.lua")
 
     local value = args and args.value
@@ -868,8 +920,8 @@ local function register_file_tools()
       proxy[k] = v
     end
     proxy.value = parsed
-    return M.write_json_key(proxy)
-  end)
+    return M.write_json_key(proxy, context)
+  end, { category = "write" })
 
   Registry.register_tool("git_status", {
     type = "function",
@@ -887,7 +939,7 @@ local function register_file_tools()
         required = {},
       },
     },
-  }, M.git_status)
+  }, M.git_status, { category = "git" })
 
   Registry.register_tool("git_diff", {
     type = "function",
@@ -909,7 +961,7 @@ local function register_file_tools()
         required = {},
       },
     },
-  }, M.git_diff)
+  }, M.git_diff, { category = "git" })
 end
 
 return {
