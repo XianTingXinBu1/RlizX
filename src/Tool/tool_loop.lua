@@ -18,6 +18,7 @@ if not M then
   local JsonEncoder = dofile(get_script_dir() .. "/json_encoder.lua")
   local ToolCallParser = dofile(get_script_dir() .. "/tool_call_parser.lua")
   local MessageHandler = dofile(get_script_dir() .. "/message_handler.lua")
+  local ConcurrentExecutor = dofile(get_script_dir() .. "/concurrent_executor.lua")
 
   local function trim(s)
     return (tostring(s or ""):match("^%s*(.-)%s*$"))
@@ -189,8 +190,10 @@ if not M then
         tool_calls = tool_calls,
       }
 
-      for _, tool_call in ipairs(tool_calls) do
-        local tool_response = M.execute_single_tool(tool_call, on_progress, context)
+      -- 使用并发执行器处理工具调用
+      local tool_responses = ConcurrentExecutor.execute_tools_concurrent(tool_calls, context, on_progress)
+
+      for _, tool_response in ipairs(tool_responses) do
         messages[#messages + 1] = tool_response
       end
     end

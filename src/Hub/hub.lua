@@ -7,6 +7,10 @@ local Cfg = dofile(BASE_DIR .. "/config.lua")
 local Http = dofile(BASE_DIR .. "/http.lua")
 local Mem = dofile(BASE_DIR .. "/memory.lua")
 
+-- 加载优化模块
+local ConnectionPool = dofile(BASE_DIR .. "/connection_pool.lua")
+local MemoryCache = dofile(BASE_DIR .. "/memory_cache.lua")
+
 local ToolExecutor = dofile(BASE_DIR .. "/../Tool/tool_executor.lua")
 local FileManager = dofile(BASE_DIR .. "/../Tool/file_manager.lua")
 
@@ -72,7 +76,12 @@ end
 local function build_system_text(base, agent_name, _input, _cfg)
   local parts = {}
 
-  local role_text = Mem.read_role_text(base, agent_name)
+  -- 使用缓存获取角色文本
+  local role_cache_key = string.format("role_text:%s:%s", base, agent_name)
+  local role_text = MemoryCache.get_or_compute(role_cache_key, function()
+    return Mem.read_role_text(base, agent_name) or ""
+  end, 300)  -- 缓存 5 分钟
+
   if role_text and role_text ~= "" then
     parts[#parts + 1] = role_text
   end
@@ -89,7 +98,12 @@ local function build_system_text(base, agent_name, _input, _cfg)
   }, "\n")
   parts[#parts + 1] = structure_hint
 
-  local memory = Mem.read_memory_list(base, agent_name)
+  -- 使用缓存获取记忆列表（短缓存，因为记忆可能频繁更新）
+  local memory_cache_key = string.format("memory_list:%s:%s", base, agent_name)
+  local memory = MemoryCache.get_or_compute(memory_cache_key, function()
+    return Mem.read_memory_list(base, agent_name)
+  end, 30)  -- 缓存 30 秒
+
   if #memory > 0 then
     local lines = { "工作记忆:" }
     for _, item in ipairs(memory) do
@@ -138,6 +152,11 @@ function M.handle_request_result(input, agent_name, on_progress)
 
   cfg.agent_name = agent_name
 
+  -- 启用连接池（如果未明确禁用）
+  if cfg.use_connection_pool ~= false then
+    cfg.use_connection_pool = true
+  end
+
   local initial_messages = build_messages(base, agent_name, input, cfg)
 
   local text, err2 = ToolExecutor.handle_tool_loop(
@@ -149,6 +168,20 @@ function M.handle_request_result(input, agent_name, on_progress)
 
   if not text then
     return make_error("TOOL_LOOP_ERROR", "工具调用失败", err2)
+  end
+
+  -- 请求完成后，清理记忆列表缓存（因为记忆可能已更新）
+  local memory_cache_key = string.format("memory_list:%s:%s", base, agent_name)
+  MemoryCache.delete(memory_cache_key)
+
+  -- 定期清理过期缓存（每100次请求）
+  if math.random(1, 100) == 1 then
+    MemoryCache.cleanup()
+  end
+
+  -- 定期清理连接池（每100次请求）
+  if math.random(1, 100) == 1 then
+    ConnectionPool.cleanup()
   end
 
   return ok_result(text)

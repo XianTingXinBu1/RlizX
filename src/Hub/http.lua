@@ -2,14 +2,18 @@ local U = dofile(require("debug").getinfo(1, "S").source:sub(2):match("^(.*)/") 
 
 local M = {}
 
-local function make_request_text(host, path, api_key, payload)
+-- 加载连接池模块
+local ConnectionPool = dofile(require("debug").getinfo(1, "S").source:sub(2):match("^(.*)/") .. "/connection_pool.lua")
+
+local function make_request_text(host, path, api_key, payload, keep_alive)
+  local connection_header = keep_alive and "keep-alive" or "close"
   return table.concat({
     "POST ", path, " HTTP/1.1\r\n",
     "Host: ", host, "\r\n",
     "Content-Type: application/json\r\n",
     "Authorization: Bearer ", api_key, "\r\n",
     "Content-Length: ", tostring(#payload), "\r\n",
-    "Connection: close\r\n\r\n",
+    "Connection: ", connection_header, "\r\n\r\n",
     payload,
   })
 end
@@ -21,6 +25,11 @@ local function load_tls_module()
     return nil, "TLS 模块未编译: 请先在 src/TLS 目录下执行 make"
   end
   return tls()
+end
+
+-- 获取当前 worker ID（用于连接池分组）
+local function get_worker_id()
+  return os.getenv("RLIZX_WORKER_ID") or "default"
 end
 
 local function split_header_and_body(buffer)
@@ -169,25 +178,70 @@ function M.http_request(cfg, payload)
     return nil, perr
   end
 
-  local req = make_request_text(host, path, cfg.api_key, payload)
+  -- 检查是否启用连接池
+  local use_pool = cfg.use_connection_pool ~= false
+  local worker_id = get_worker_id()
+  local conn = nil
+
+  -- 尝试从连接池获取连接
+  if use_pool and scheme == "https" then
+    conn, perr = ConnectionPool.acquire(worker_id, host, port, {
+      scheme = scheme,
+      ca_file = cfg.ca_file,
+      timeout = cfg.timeout,
+      verify_tls = cfg.verify_tls
+    })
+  end
+
+  -- 如果没有从池中获取到连接，或者不使用连接池，则创建新连接
+  local req = make_request_text(host, path, cfg.api_key, payload, conn ~= nil)
 
   local tls, tls_err = load_tls_module()
   if not tls then
+    -- 释放连接（如果已获取）
+    if conn then
+      ConnectionPool.release(worker_id, host, port, conn)
+    end
     return nil, tls_err
   end
 
-  if scheme == "https" then
-    local resp, err = tls.request(host, port, req, cfg.ca_file, cfg.timeout, cfg.verify_tls)
-    if not resp then
-      return nil, err
+  local resp, err
+
+  if conn and conn.tls_handle then
+    -- 使用池中的连接
+    local ok, result = pcall(tls.request_with_connection, conn.tls_handle, req, cfg.timeout)
+    if not ok then
+      err = result
+      -- 连接可能已失效，关闭它
+      ConnectionPool.release(worker_id, host, port, conn)
+      conn = nil
+    else
+      resp = result
     end
-    return resp
   end
 
-  local resp, err = tls.tcp_request(host, port, req, cfg.timeout)
+  -- 如果池连接失败或不使用连接池，使用传统方式
   if not resp then
-    return nil, err
+    if scheme == "https" then
+      resp, err = tls.request(host, port, req, cfg.ca_file, cfg.timeout, cfg.verify_tls)
+    else
+      resp, err = tls.tcp_request(host, port, req, cfg.timeout)
+    end
+
+    if not resp then
+      -- 释放连接（如果已获取）
+      if conn then
+        ConnectionPool.release(worker_id, host, port, conn)
+      end
+      return nil, err
+    end
   end
+
+  -- 释放连接回池
+  if conn then
+    ConnectionPool.release(worker_id, host, port, conn)
+  end
+
   return resp
 end
 
